@@ -6,12 +6,12 @@ from discord import app_commands
 from discord.ext import commands
 import aiohttp
 
-# --- Render Web Server (Keep Alive) ---
+# --- Render Keep-Alive Server ---
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot is running healthy!"
+    return "Bot service is alive and healthy!"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -22,36 +22,46 @@ def keep_alive():
     t.daemon = True
     t.start()
 
-# --- Discord Bot Setup ---
+# --- Discord Bot Client ---
 intents = discord.Intents.default()
+# intents.message_content = True  # Agar developer portal me enable kiya hai toh use karein
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
+    print(f"Logged in successfully as: {bot.user} (ID: {bot.user.id})")
     try:
-        await bot.tree.sync()
-        print(f"Logged in as {bot.user}")
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} command(s) successfully.")
     except Exception as e:
-        print(f"Sync error: {e}")
+        print(f"Command sync error: {e}")
 
 @bot.tree.command(name="playerinfo", description="Get Free Fire player details")
-@app_commands.describe(uid="Player UID", region="Region (IND, BD, SG)")
+@app_commands.describe(uid="Player UID", region="Server Region (IND, BD, SG, etc.)")
 async def playerinfo(interaction: discord.Interaction, uid: str, region: str = "IND"):
     await interaction.response.defer()
     
     url = f"https://mani272api.xyz/api/info?uid={uid}&region={region.upper()}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
-    
+
     try:
         async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url, timeout=12) as response:
-                if response.status == 200:
+            async with session.get(url, timeout=15) as resp:
+                text_data = await resp.text()
+                
+                # Agar Cloudflare ne block kiya ya HTML error return hua
+                if "<html" in text_data.lower() or "cloudflare" in text_data.lower():
+                    await interaction.followup.send("⚠️ API Server ne request block kar di (Cloudflare Protection). Please thodi der baad try karein.")
+                    return
+
+                if resp.status == 200:
+                    import json
                     try:
-                        data = await response.json()
+                        data = json.loads(text_data)
                     except Exception:
-                        await interaction.followup.send("⚠️ API returned invalid data (Cloudflare block). Try again later.")
+                        await interaction.followup.send("⚠️ API response ko read karne me issue aaya.")
                         return
 
                     basic = data.get("basic_info", data)
@@ -61,25 +71,30 @@ async def playerinfo(interaction: discord.Interaction, uid: str, region: str = "
                     br_rank = basic.get("br_rank", "N/A")
                     cs_rank = basic.get("cs_rank", "N/A")
 
-                    embed = discord.Embed(title=f"🎮 Player: {nickname}", color=0x00FFCC)
-                    embed.add_field(name="UID", value=uid, inline=True)
+                    embed = discord.Embed(title=f"🎮 Player Info: {nickname}", color=0x00FFCC)
+                    embed.add_field(name="UID", value=str(uid), inline=True)
                     embed.add_field(name="Region", value=region.upper(), inline=True)
                     embed.add_field(name="Level", value=str(level), inline=True)
                     embed.add_field(name="Likes", value=str(likes), inline=True)
                     embed.add_field(name="BR Rank", value=str(br_rank), inline=True)
                     embed.add_field(name="CS Rank", value=str(cs_rank), inline=True)
                     embed.set_footer(text="DEVELOPED BY PERSISTX")
-
+                    
                     await interaction.followup.send(embed=embed)
                 else:
-                    await interaction.followup.send(f"⚠️ API Error (Status {response.status}). UID check karein.")
+                    await interaction.followup.send(f"⚠️ API returned status code: {resp.status}")
     except Exception as err:
-        await interaction.followup.send(f"⚠️ Error: `{str(err)}`")
+        await interaction.followup.send(f"⚠️ Request Failed: `{str(err)}`")
 
+# --- Execution Entry Point ---
 if __name__ == "__main__":
     keep_alive()
-    token = os.environ.get("DISCORD_TOKEN")
-    if token:
-        bot.run(token)
+    bot_token = os.environ.get("DISCORD_TOKEN")
+    
+    if not bot_token:
+        print("ERROR: DISCORD_TOKEN environment variable nahi mila. Render Dashboard me check karein!")
     else:
-        print("CRITICAL: DISCORD_TOKEN is missing in Environment Variables!")
+        try:
+            bot.run(bot_token)
+        except Exception as e:
+            print(f"Bot failed to run: {e}")
