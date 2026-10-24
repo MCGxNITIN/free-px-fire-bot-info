@@ -6,6 +6,10 @@ from discord import app_commands
 from discord.ext import commands
 import aiohttp
 
+# --- Specific Server & Channel Restrictions ---
+ALLOWED_GUILD_ID = 1525181999147388958
+ALLOWED_CHANNEL_ID = 1548235918895484958
+
 # --- Render Keep-Alive Server ---
 app = Flask(__name__)
 
@@ -24,7 +28,6 @@ def keep_alive():
 
 # --- Discord Bot Client ---
 intents = discord.Intents.default()
-# intents.message_content = True  # Agar developer portal me enable kiya hai toh use karein
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
@@ -39,6 +42,22 @@ async def on_ready():
 @bot.tree.command(name="playerinfo", description="Get Free Fire player details")
 @app_commands.describe(uid="Player UID", region="Server Region (IND, BD, SG, etc.)")
 async def playerinfo(interaction: discord.Interaction, uid: str, region: str = "IND"):
+    # 1. Server ID Check
+    if interaction.guild_id != ALLOWED_GUILD_ID:
+        await interaction.response.send_message(
+            "❌ Yeh bot is server ke liye authorized nahi hai!",
+            ephemeral=True
+        )
+        return
+
+    # 2. Channel ID Check
+    if interaction.channel_id != ALLOWED_CHANNEL_ID:
+        await interaction.response.send_message(
+            f"❌ Yeh command sirf <#{ALLOWED_CHANNEL_ID}> channel me use ki ja sakti hai!",
+            ephemeral=True
+        )
+        return
+
     await interaction.response.defer()
     
     url = f"https://mani272api.xyz/api/info?uid={uid}&region={region.upper()}"
@@ -51,7 +70,6 @@ async def playerinfo(interaction: discord.Interaction, uid: str, region: str = "
             async with session.get(url, timeout=15) as resp:
                 text_data = await resp.text()
                 
-                # Agar Cloudflare ne block kiya ya HTML error return hua
                 if "<html" in text_data.lower() or "cloudflare" in text_data.lower():
                     await interaction.followup.send("⚠️ API Server ne request block kar di (Cloudflare Protection). Please thodi der baad try karein.")
                     return
@@ -92,7 +110,7 @@ if __name__ == "__main__":
     bot_token = os.environ.get("DISCORD_TOKEN")
     
     if not bot_token:
-        print("ERROR: DISCORD_TOKEN environment variable nahi mila. Render Dashboard me check karein!")
+        print("ERROR: DISCORD_TOKEN environment variable missing!")
     else:
         try:
             bot.run(bot_token)
